@@ -1,133 +1,97 @@
 package com.test.Database_Testing;
 
-import java.sql.*;
-import java.util.*;
-
 import org.testng.annotations.Test;
 
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.time.temporal.ChronoUnit;
+import java.util.Properties;
+import javax.mail.*;
+import javax.mail.internet.*;
+
 public class demo {
-	
-	 @Test
-	    public void testDB() {
-	        Connection connection = null;
-	        try {
-	            Class.forName("com.mysql.cj.jdbc.Driver");
-	            System.out.println("Driver loaded");
 
-	            String url = "jdbc:mysql://apollo2.humanbrain.in:3306/HBA_V2";
-	            String username = "root";
-	            String password = "Health#123";
-	            connection = DriverManager.getConnection(url, username, password);
-	            System.out.println("MYSQL database connected");
+    @Test
+    public void testDB() {
+        try {
+            Class.forName("com.mysql.cj.jdbc.Driver");
+            System.out.println("Driver loaded");
 
-	            // Get slidebatch ID from user input
-	            Scanner scanner = new Scanner(System.in);
-	            System.out.println("Enter the slidebatch ID:");
-	            int slidebatchId = scanner.nextInt();
+            String url = "jdbc:mysql://apollo2.humanbrain.in:3306/HBA_V2";
+            String username = "root";
+            String password = "Health#123";
+            Connection connection = DriverManager.getConnection(url, username, password);
+            System.out.println("MYSQL database connected");
 
-	            // Execute the query and collect results
-	            List<Map<String, Object>> queryResults = executeAndCollectQueryResults(connection, slidebatchId);
+            executeAndPrintQuery(connection);
+            connection.close();
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 
-	            connection.close();
+    private void executeAndPrintQuery(Connection connection) {
+        try {
+            Statement statement = connection.createStatement();
+            String query = "SELECT id, name, datalocation, arrival_date, totalImages " +
+                           "FROM `slidebatch` " +
+                           "WHERE (process_status = 6 OR process_status = 11) " +
+                           "AND `arrival_date` < DATE_SUB(CURDATE(), INTERVAL 1 DAY);";
 
-	            // Print the query results
-	            printQueryResults(queryResults);
+            ResultSet resultSet = statement.executeQuery(query);
 
-	        } catch (Exception e) {
-	            e.printStackTrace();
-	        } finally {
-	            try {
-	                if (connection != null && !connection.isClosed()) {
-	                    connection.close();
-	                }
-	            } catch (Exception e) {
-	                e.printStackTrace();
-	            }
-	        }
-	    }
+            int IdWidth = 10;
+            int nameWidth = 40;
+            int datalocationWidth = 30;
+            int arrival_dateWidth = 20;
+            int totalImagesWidth = 20;
+            int daysWidth = 15; // Width for the new column
 
-	    private List<Map<String, Object>> executeAndCollectQueryResults(Connection connection, int slidebatchId) {
-	        List<Map<String, Object>> queryResults = new ArrayList<>();
-	        Statement statement = null;
-	        ResultSet resultSet = null;
+            // Building email content
+            StringBuilder emailContent = new StringBuilder();
+            emailContent.append("<html><body><pre>");
+            emailContent.append("<b>This is an automatically generated email,</b>\n\n");
+            emailContent.append("For your attention and action:\n");
+            emailContent.append("The following batches have QC pending for more than 1 day:\n\n");
+            emailContent.append(String.format("%-" + IdWidth + "s %-"+ nameWidth + "s %-"+ datalocationWidth + "s %-"+ arrival_dateWidth + "s %-" + totalImagesWidth + "s %-" + daysWidth + "s%n",
+                    "Id", "name", "datalocation", "arrival_date", "totalImages", "No.of days"));
 
-	        try {
-	            statement = connection.createStatement();
-	            String query = "SELECT slidebatch.id, slide.filename, huron_slideinfo.isQC FROM slidebatch "
-	                         + "LEFT JOIN slide ON slide.slidebatch = slidebatch.id "
-	                         + "LEFT JOIN huron_slideinfo ON huron_slideinfo.slide = slide.id "
-	                         + "WHERE slidebatch.id = " + slidebatchId;
+            // Adding separator line
+            String separatorLine = "-".repeat(IdWidth + nameWidth + datalocationWidth + arrival_dateWidth + totalImagesWidth + daysWidth);
+            emailContent.append(separatorLine).append("\n");
 
-	            resultSet = statement.executeQuery(query);
+            boolean dataFound = false;
 
-	            while (resultSet.next()) {
-	                Map<String, Object> result = new HashMap<>();
-	                result.put("id", resultSet.getInt("id"));
-	                result.put("filename", resultSet.getString("filename"));
-	                result.put("isQC", resultSet.getBoolean("isQC"));
+            while (resultSet.next()) {
+                dataFound = true;
+                int id = resultSet.getInt("id");
+                String name = resultSet.getString("name");
+                String datalocation = resultSet.getString("datalocation");
+                String arrivalDateStr = resultSet.getString("arrival_date"); // Assuming arrival_date is stored as a String
+                int totalImages = resultSet.getInt("totalImages");
 
-	                String filename = resultSet.getString("filename");
-	                // Extract the biosample value
-	                String biosample = filename.substring(filename.indexOf("B_") + 2,
-	                        filename.indexOf('_', filename.indexOf("B_") + 2));
-	                result.put("biosample", biosample);
+                LocalDate arrivalDate = LocalDate.parse(arrivalDateStr, DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+                long daysDifference = ChronoUnit.DAYS.between(arrivalDate, LocalDate.now());
 
-	                // Extract the series value
-	                String series = filename.substring(filename.indexOf("ST_") + 3,
-	                        filename.indexOf('-', filename.indexOf("ST_") + 3));
-	                result.put("series", series);
+                emailContent.append(String.format("%-" + IdWidth + "d %-" + nameWidth + "s %-" + datalocationWidth + "s %-" + arrival_dateWidth + "s %-" + totalImagesWidth + "d %-" + daysWidth + "d%n",
+                        id, name, datalocation, arrivalDateStr, totalImages, daysDifference));
+            }
 
-	                // Extract the section value
-	                String section = filename.substring(filename.indexOf("SE_") + 3,
-	                        filename.lastIndexOf('.'));
-	                result.put("section", section);
+            
 
-	                queryResults.add(result);
-	            }
+            // Close the statement
+            resultSet.close();
+            statement.close();
 
-	        } catch (Exception e) {
-	            e.printStackTrace();
-	        } finally {
-	            try {
-	                if (resultSet != null) resultSet.close();
-	                if (statement != null) statement.close();
-	            } catch (Exception e) {
-	                e.printStackTrace();
-	            }
-	        }
-	        return queryResults;
-	    }
-
-	    private void printQueryResults(List<Map<String, Object>> queryResults) {
-
-	        int qcTrueCount = 0;
-	        int qcFalseCount = 0;
-
-	        for (Map<String, Object> result : queryResults) {
-	            boolean isQC = (boolean) result.get("isQC");
-	            if (isQC) {
-	                qcTrueCount++;
-	            } else {
-	                qcFalseCount++;
-	            }
-	        }
-	        System.out.println("Total no.of sections: " + queryResults.size());
-	        System.out.println("Total no.of QC passed sections: " + qcTrueCount);
-	        System.out.println("Total no.of QC failed sections: " + qcFalseCount);
-	        System.out.println("Query Result:");
-	        System.out.println("--------------------------------------------------------------------------------------------------------");
-	        System.out.printf("%-10s | %-10s | %-10s | %-10s | %-45s | %-10s%n", "ID", "Biosample", "Series", "Section", "Filename", "isQC");
-	        System.out.println("--------------------------------------------------------------------------------------------------------");
-	        for (Map<String, Object> result : queryResults) {
-	            System.out.printf("%-10d | %-10s | %-10s | %-10s | %-45s | %-10b%n",
-	                    (int) result.get("id"),
-	                    (String) result.get("biosample"),
-	                    (String) result.get("series"),
-	                    (String) result.get("section"),
-	                    (String) result.get("filename"),
-	                    (boolean) result.get("isQC"));
-	        }
-	        System.out.println("--------------------------------------------------------------------------------------------------------");
-	    }
-
+          
+            
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
 }
