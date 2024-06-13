@@ -33,7 +33,7 @@ public class Image_Out_Batches {
 
     @Parameters("slidebatchId")
     @Test
-    public void testDB(@Optional("defaultSlidebatchId") String slidebatchId) {
+    public void testDB(@Optional("SlidebatchId") String slidebatchId) {
         Connection connection = null;
         try {
             Class.forName("com.mysql.cj.jdbc.Driver");
