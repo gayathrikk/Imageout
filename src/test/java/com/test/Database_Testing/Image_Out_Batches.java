@@ -45,16 +45,8 @@ public class Image_Out_Batches {
             connection = DriverManager.getConnection(url, username, password);
             System.out.println("MYSQL database connected");
 
-            int slidebatchIdInt;
-            try {
-                slidebatchIdInt = Integer.parseInt(slidebatchId);
-            } catch (NumberFormatException e) {
-                System.err.println("Invalid slidebatchId provided: " + slidebatchId);
-                return; // Exit the method if the slidebatchId is invalid
-            }
-
             // Execute the query and collect results
-            List<QueryResult> queryResults = executeAndCollectQueryResults(connection, slidebatchIdInt);
+            List<QueryResult> queryResults = executeAndCollectQueryResults(connection, slidebatchId);
 
             // Print the query results
             printQueryResults(queryResults);
@@ -78,7 +70,7 @@ public class Image_Out_Batches {
         }
     }
 
-    private List<QueryResult> executeAndCollectQueryResults(Connection connection, int slidebatchId) {
+    private List<QueryResult> executeAndCollectQueryResults(Connection connection, String slidebatchId) {
         List<QueryResult> queryResults = new ArrayList<>();
         Statement statement = null;
         ResultSet resultSet = null;
