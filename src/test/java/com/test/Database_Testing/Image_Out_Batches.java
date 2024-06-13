@@ -8,6 +8,7 @@ import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.*;
 
+import org.testng.annotations.Parameters;
 import org.testng.annotations.Test;
 
 public class Image_Out_Batches {
@@ -30,8 +31,9 @@ public class Image_Out_Batches {
         }
     }
 
+    @Parameters("slidebatchId")
     @Test
-    public void testDB() {
+    public void testDB(String slidebatchId) {
         Connection connection = null;
         try {
             Class.forName("com.mysql.cj.jdbc.Driver");
@@ -43,15 +45,10 @@ public class Image_Out_Batches {
             connection = DriverManager.getConnection(url, username, password);
             System.out.println("MYSQL database connected");
 
-            // Get slidebatch ID from user input
-            Scanner scanner = new Scanner(System.in);
-            System.out.println("Enter the slidebatch ID:");
-            int slidebatchId = scanner.nextInt();
+            int slidebatchIdInt = Integer.parseInt(slidebatchId);
 
             // Execute the query and collect results
-            List<QueryResult> queryResults = executeAndCollectQueryResults(connection, slidebatchId);
-
-            connection.close();
+            List<QueryResult> queryResults = executeAndCollectQueryResults(connection, slidebatchIdInt);
 
             // Print the query results
             printQueryResults(queryResults);
@@ -95,16 +92,13 @@ public class Image_Out_Batches {
                 boolean isQC = resultSet.getBoolean("isQC");
 
                 // Extract the biosample value
-                String biosample = filename.substring(filename.indexOf("B_") + 2,
-                        filename.indexOf('_', filename.indexOf("B_") + 2));
+                String biosample = extractValue(filename, "B_", '_', "Biosample");
 
                 // Extract the series value
-                String series = filename.substring(filename.indexOf("ST_") + 3,
-                        filename.indexOf('-', filename.indexOf("ST_") + 3));
+                String series = extractValue(filename, "ST_", '-', "Series");
 
                 // Extract the section value
-                String section = filename.substring(filename.indexOf("SE_") + 3,
-                        filename.lastIndexOf('.'));
+                String section = extractValue(filename, "SE_", '.', "Section");
 
                 queryResults.add(new QueryResult(id, biosample, series, section, filename, isQC));
             }
@@ -122,18 +116,32 @@ public class Image_Out_Batches {
         return queryResults;
     }
 
-    private void printQueryResults(List<QueryResult> queryResults) {
-    	
-    	 int qcTrueCount = 0;
-         int qcFalseCount = 0;
+    private String extractValue(String filename, String prefix, char delimiter, String valueType) {
+        String value = "";
+        try {
+            int startIndex = filename.indexOf(prefix) + prefix.length();
+            int endIndex = filename.indexOf(delimiter, startIndex);
+            if (endIndex == -1) {
+                endIndex = filename.lastIndexOf(delimiter);
+            }
+            value = filename.substring(startIndex, endIndex);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return value;
+    }
 
-         for (QueryResult result : queryResults) {
-             if (result.isQC) {
-                 qcTrueCount++;
-             } else {
-                 qcFalseCount++;
-             }
-         }
+    private void printQueryResults(List<QueryResult> queryResults) {
+        int qcTrueCount = 0;
+        int qcFalseCount = 0;
+
+        for (QueryResult result : queryResults) {
+            if (result.isQC) {
+                qcTrueCount++;
+            } else {
+                qcFalseCount++;
+            }
+        }
         System.out.println("Total no.of sections: " + queryResults.size());
         System.out.println("Total no.of QC passed sections: " + qcTrueCount);
         System.out.println("Total no.of QC failed sections: " + qcFalseCount);
@@ -165,8 +173,8 @@ public class Image_Out_Batches {
             session.connect();
 
             // Create the command
-            String command = "cd /lustre/data/store10PB/repos1/iitlab/humanbrain/analytics/" 
-                            + biosample + "/" + series 
+            String command = "cd /lustre/data/store10PB/repos1/iitlab/humanbrain/analytics/"
+                            + biosample + "/" + series
                             + " && ls | grep SE_" + section;
 
             ChannelExec channelExec = (ChannelExec) session.openChannel("exec");
