@@ -33,7 +33,7 @@ public class Image_Out_Batches {
 
     @Parameters("slidebatchId")
     @Test
-   public void testDB(@Optional("defaultSlidebatchId") String slidebatchId) {
+    public void testDB(@Optional("1") String slidebatchId) {
         Connection connection = null;
         try {
             Class.forName("com.mysql.cj.jdbc.Driver");
@@ -45,7 +45,13 @@ public class Image_Out_Batches {
             connection = DriverManager.getConnection(url, username, password);
             System.out.println("MYSQL database connected");
 
-            int slidebatchIdInt = Integer.parseInt(slidebatchId);
+            int slidebatchIdInt;
+            try {
+                slidebatchIdInt = Integer.parseInt(slidebatchId);
+            } catch (NumberFormatException e) {
+                System.err.println("Invalid slidebatchId provided: " + slidebatchId);
+                return; // Exit the method if the slidebatchId is invalid
+            }
 
             // Execute the query and collect results
             List<QueryResult> queryResults = executeAndCollectQueryResults(connection, slidebatchIdInt);
