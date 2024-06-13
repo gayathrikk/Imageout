@@ -1,97 +1,83 @@
 package com.test.Database_Testing;
 
-import org.testng.annotations.Test;
-
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.time.LocalDate;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
-import java.util.Properties;
-import javax.mail.*;
-import javax.mail.internet.*;
+import java.util.LinkedHashSet;
+import java.util.Set;
+
+import org.testng.annotations.Test;
 
 public class demo {
+	
 
     @Test
-    public void testDB() {
-        try {
-            Class.forName("com.mysql.cj.jdbc.Driver");
-            System.out.println("Driver loaded");
+    public void testDB() throws ClassNotFoundException, SQLException {
+        Class.forName("com.mysql.jdbc.Driver");
+        System.out.println("Driver loaded");
 
-            String url = "jdbc:mysql://apollo2.humanbrain.in:3306/HBA_V2";
-            String username = "root";
-            String password = "Health#123";
-            Connection connection = DriverManager.getConnection(url, username, password);
-            System.out.println("MYSQL database connected");
+        String url = "jdbc:mysql://apollo2.humanbrain.in:3306/HBA_V2";
+        String username = "root";
+        String password = "Health#123";
+        Connection connection = DriverManager.getConnection(url, username, password);
+        System.out.println("MYSQL database connect");
 
-            executeAndPrintQuery(connection);
-            connection.close();
-        } catch (Exception e) {
-            e.printStackTrace();
+        // Define an array of jp2Path values to loop through
+        String[] jp2Paths = {"pp1", "pp2", "pp3", "pp4", "pp5", "pp7", "pre5" ,"pre4" ,"pre7"};
+
+        for (int i = 0; i < jp2Paths.length; i++) {
+            int count = processQuery(connection, jp2Paths[i]);
+            System.out.println("*****************************************************Total Pending Batches of " + jp2Paths[i] + ": " + count + "*****************************************************");
+ 
+            // Add extra spaces between specific jp2Path values
+            if (i < jp2Paths.length - 1) {
+                System.out.println(); // Add an empty line for spacing
+            }
         }
+
+        // Close the database connection
+        connection.close();
     }
 
-    private void executeAndPrintQuery(Connection connection) {
-        try {
-            Statement statement = connection.createStatement();
-            String query = "SELECT id, name, datalocation, arrival_date, totalImages " +
-                           "FROM `slidebatch` " +
-                           "WHERE (process_status = 6 OR process_status = 11) " +
-                           "AND `arrival_date` < DATE_SUB(CURDATE(), INTERVAL 1 DAY);";
+    private int processQuery(Connection connection, String jp2Path) throws SQLException {
+        Statement statement = connection.createStatement();
+        String query = "SELECT " +
+                "sb.id AS slidebatch_id, " +
+                "sb.name AS name, " +
+                "s.filename AS filename " +
+                "FROM slidebatch sb " +
+                "LEFT JOIN slide s ON sb.id = s.slidebatch " +
+                "WHERE sb.process_status = 8 " +
+                "AND sb.arrival_date LIKE '%2024%'" +           
+                "AND s.jp2Path LIKE '%" + jp2Path + "%';";
+        ResultSet resultSet = statement.executeQuery(query);
 
-            ResultSet resultSet = statement.executeQuery(query);
+        Set<Integer> distinctBatchIds = new LinkedHashSet<>();
+        Integer lastId = null;  // Keep track of the last processed ID
 
-            int IdWidth = 10;
-            int nameWidth = 40;
-            int datalocationWidth = 30;
-            int arrival_dateWidth = 20;
-            int totalImagesWidth = 20;
-            int daysWidth = 15; // Width for the new column
+        while (resultSet.next()) {
+            Integer id = resultSet.getInt("slidebatch_id");
+            String name = resultSet.getString("name");
+            String filename = resultSet.getString("filename");
 
-            // Building email content
-            StringBuilder emailContent = new StringBuilder();
-            emailContent.append("<html><body><pre>");
-            emailContent.append("<b>This is an automatically generated email,</b>\n\n");
-            emailContent.append("For your attention and action:\n");
-            emailContent.append("The following batches have QC pending for more than 1 day:\n\n");
-            emailContent.append(String.format("%-" + IdWidth + "s %-"+ nameWidth + "s %-"+ datalocationWidth + "s %-"+ arrival_dateWidth + "s %-" + totalImagesWidth + "s %-" + daysWidth + "s%n",
-                    "Id", "name", "datalocation", "arrival_date", "totalImages", "No.of days"));
-
-            // Adding separator line
-            String separatorLine = "-".repeat(IdWidth + nameWidth + datalocationWidth + arrival_dateWidth + totalImagesWidth + daysWidth);
-            emailContent.append(separatorLine).append("\n");
-
-            boolean dataFound = false;
-
-            while (resultSet.next()) {
-                dataFound = true;
-                int id = resultSet.getInt("id");
-                String name = resultSet.getString("name");
-                String datalocation = resultSet.getString("datalocation");
-                String arrivalDateStr = resultSet.getString("arrival_date"); // Assuming arrival_date is stored as a String
-                int totalImages = resultSet.getInt("totalImages");
-
-                LocalDate arrivalDate = LocalDate.parse(arrivalDateStr, DateTimeFormatter.ofPattern("yyyy-MM-dd"));
-                long daysDifference = ChronoUnit.DAYS.between(arrivalDate, LocalDate.now());
-
-                emailContent.append(String.format("%-" + IdWidth + "d %-" + nameWidth + "s %-" + datalocationWidth + "s %-" + arrival_dateWidth + "s %-" + totalImagesWidth + "d %-" + daysWidth + "d%n",
-                        id, name, datalocation, arrivalDateStr, totalImages, daysDifference));
+            // Check if the current ID is different from the last one and insert a space
+            if (lastId != null && !id.equals(lastId)) {
+                System.out.println(); // Insert a space if not the first unique ID
             }
 
-            
+            System.out.println("ID: " + id + "----- Name: " + name + "--------- Filename: " + filename);
 
-            // Close the statement
-            resultSet.close();
-            statement.close();
-
-          
-            
-        } catch (Exception e) {
-            e.printStackTrace();
+            distinctBatchIds.add(id);
+            lastId = id;
         }
+
+        // Close resources
+        resultSet.close();
+        statement.close();
+
+        return distinctBatchIds.size();
     }
+
 }
