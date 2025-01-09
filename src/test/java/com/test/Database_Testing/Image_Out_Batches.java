@@ -1,160 +1,131 @@
-package com.test.Database_Testing;
+package Automation.test;
 
 import com.jcraft.jsch.*;
+
 import java.io.*;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.Statement;
 import java.util.*;
-import org.testng.annotations.Optional;
-import org.testng.annotations.Parameters;
+
+import org.testng.Assert;
 import org.testng.annotations.Test;
 
-public class Image_Out_Batches {
+public class Imageout_pathVerify {
 
     class QueryResult {
         int id;
-        String biosample;
-        String series;
-        String section;
         String filename;
+        String jp2Path;
         boolean isQC;
 
-        public QueryResult(int id, String biosample, String series, String section, String filename, boolean isQC) {
+        public QueryResult(int id, String filename, String jp2Path, boolean isQC) {
             this.id = id;
-            this.biosample = biosample;
-            this.series = series;
-            this.section = section;
             this.filename = filename;
+            this.jp2Path = jp2Path;
             this.isQC = isQC;
         }
     }
 
-    @Parameters("slidebatchId")
     @Test
-    public void testDB(@Optional String slidebatchId) {
-        Connection connection = null;
-        try {
-            Class.forName("com.mysql.cj.jdbc.Driver");
-            System.out.println("Driver loaded");
+    public void testDB() {
+        String url = "jdbc:mysql://apollo2.humanbrain.in:3306/HBA_V2";
+        String username = "root";
+        String password = "Health#123";
 
-            String url = "jdbc:mysql://apollo2.humanbrain.in:3306/HBA_V2";
-            String username = "root";
-            String password = "Health#123";
-            connection = DriverManager.getConnection(url, username, password);
+        // Establish connection to the database
+        try (Connection connection = DriverManager.getConnection(url, username, password)) {
             System.out.println("MYSQL database connected");
+
+            // Get slidebatch ID from user input
+            Scanner scanner = new Scanner(System.in);
+            System.out.println("Enter the slidebatch ID:");
+            int slidebatchId = scanner.nextInt();
+            scanner.close();
 
             // Execute the query and collect results
             List<QueryResult> queryResults = executeAndCollectQueryResults(connection, slidebatchId);
 
-            // Print the query results
+            // Print the query results in a table format
             printQueryResults(queryResults);
 
-            // Execute SSH commands for each query result and check formats
+            // List to collect incorrect paths
+            List<String> incorrectPaths = new ArrayList<>();
+
+            // Check formats for each result
             for (QueryResult result : queryResults) {
-                List<String> providedFormats = executeSSHCommand(result.biosample, result.series, result.section);
-                checkAndPrintMissingFormats(providedFormats);
+                List<String> providedFormats = executeSSHCommand(result.filename);
+                if (!isPathValid(result.jp2Path)) {
+                    incorrectPaths.add(result.jp2Path); // Add incorrect path to the list
+                }
             }
+
+            // Print all incorrect paths
+            if (!incorrectPaths.isEmpty()) {
+                System.out.println("Incorrect JP2 Paths:");
+                for (String path : incorrectPaths) {
+                    System.out.println(path);
+                }
+            } else {
+                System.out.println("All paths are correct.");
+            }
+
+            // Fail the test if there are incorrect paths
+            Assert.assertTrue(incorrectPaths.isEmpty(), "Some JP2 paths did not match the expected format.");
 
         } catch (Exception e) {
             e.printStackTrace();
-        } finally {
-            try {
-                if (connection != null && !connection.isClosed()) {
-                    connection.close();
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
         }
     }
 
-    private List<QueryResult> executeAndCollectQueryResults(Connection connection, String slidebatchId) {
+    private List<QueryResult> executeAndCollectQueryResults(Connection connection, int slidebatchId) {
         List<QueryResult> queryResults = new ArrayList<>();
-        Statement statement = null;
-        ResultSet resultSet = null;
+        String query = "SELECT slidebatch.id, slide.filename, slide.jp2Path, huron_slideinfo.isQC "
+                     + "FROM slidebatch "
+                     + "LEFT JOIN slide ON slide.slidebatch = slidebatch.id "
+                     + "LEFT JOIN huron_slideinfo ON huron_slideinfo.slide = slide.id "
+                     + "WHERE slidebatch.id = " + slidebatchId;
 
-        try {
-            statement = connection.createStatement();
-            String query = "SELECT slidebatch.id, slide.filename, huron_slideinfo.isQC FROM slidebatch "
-                         + "LEFT JOIN slide ON slide.slidebatch = slidebatch.id "
-                         + "LEFT JOIN huron_slideinfo ON huron_slideinfo.slide = slide.id "
-                         + "WHERE slidebatch.id = " + slidebatchId;
-
-            resultSet = statement.executeQuery(query);
-
+        try (Statement statement = connection.createStatement(); ResultSet resultSet = statement.executeQuery(query)) {
             while (resultSet.next()) {
                 int id = resultSet.getInt("id");
                 String filename = resultSet.getString("filename");
+                String jp2Path = resultSet.getString("jp2Path");
                 boolean isQC = resultSet.getBoolean("isQC");
 
-                // Extract the biosample value
-                String biosample = extractValue(filename, "B_", '_', "Biosample");
-
-                // Extract the series value
-                String series = extractValue(filename, "ST_", '-', "Series");
-
-                // Extract the section value
-                String section = extractValue(filename, "SE_", '.', "Section");
-
-                queryResults.add(new QueryResult(id, biosample, series, section, filename, isQC));
+                queryResults.add(new QueryResult(id, filename, jp2Path, isQC));
             }
-
         } catch (Exception e) {
             e.printStackTrace();
-        } finally {
-            try {
-                if (resultSet != null) resultSet.close();
-                if (statement != null) statement.close();
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
         }
+
         return queryResults;
     }
 
-    private String extractValue(String filename, String prefix, char delimiter, String valueType) {
-        String value = "";
-        try {
-            int startIndex = filename.indexOf(prefix) + prefix.length();
-            int endIndex = filename.indexOf(delimiter, startIndex);
-            if (endIndex == -1) {
-                endIndex = filename.lastIndexOf(delimiter);
-            }
-            value = filename.substring(startIndex, endIndex);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-        return value;
-    }
-
     private void printQueryResults(List<QueryResult> queryResults) {
-        int qcTrueCount = 0;
-        int qcFalseCount = 0;
-
-        for (QueryResult result : queryResults) {
-            if (result.isQC) {
-                qcTrueCount++;
-            } else {
-                qcFalseCount++;
-            }
-        }
-        System.out.println("Total no.of sections: " + queryResults.size());
-        System.out.println("Total no.of QC passed sections: " + qcTrueCount);
-        System.out.println("Total no.of QC failed sections: " + qcFalseCount);
+        // Print table header
         System.out.println("Query Result:");
-        System.out.println("--------------------------------------------------------------------------------------------------------");
-        System.out.printf("%-10s | %-10s | %-10s | %-10s | %-45s | %-10s%n", "ID", "Biosample", "Series", "Section", "Filename", "isQC");
-        System.out.println("--------------------------------------------------------------------------------------------------------");
+        System.out.println("-------------------------------------------------------------------------------------------------------------------------------------------------------------------");
+        System.out.printf("%-10s | %-45s | %-60s | %-5s%n", "ID", "Filename", "JP2 Path", "Is QC");
+        System.out.println("-------------------------------------------------------------------------------------------------------------------------------------------------------------------");
+
+        // Print table rows
         for (QueryResult result : queryResults) {
-            System.out.printf("%-10d | %-10s | %-10s | %-10s | %-45s | %-10b%n", result.id, result.biosample, result.series, result.section, result.filename, result.isQC);
+            System.out.printf("%-10d | %-45s | %-60s | %-5b%n", 
+                result.id, 
+                result.filename, 
+                result.jp2Path, 
+                result.isQC
+            );
         }
-        System.out.println("--------------------------------------------------------------------------------------------------------");
+
+        System.out.println("-------------------------------------------------------------------------------------------------------------------------------------------------------------------");
     }
 
-    private List<String> executeSSHCommand(String biosample, String series, String section) {
+    private List<String> executeSSHCommand(String filename) {
         List<String> providedFormats = new ArrayList<>();
+        // Example SSH execution logic
         try {
             String host = "ap7v1.humanbrain.in";
             int port = 22;
@@ -165,15 +136,10 @@ public class Image_Out_Batches {
             Session session = jsch.getSession(user, host, port);
             session.setPassword(password);
 
-            // Avoid asking for key confirmation
             session.setConfig("StrictHostKeyChecking", "no");
-
             session.connect();
 
-            // Create the command
-            String command = "cd /lustre/data/store10PB/repos1/iitlab/humanbrain/analytics/"
-                            + biosample + "/" + series
-                            + " && ls | grep SE_" + section;
+            String command = "cd /path/to/directory && ls | grep " + filename;
 
             ChannelExec channelExec = (ChannelExec) session.openChannel("exec");
             channelExec.setCommand(command);
@@ -182,11 +148,10 @@ public class Image_Out_Batches {
             InputStream in = channelExec.getInputStream();
             channelExec.connect();
 
-            // Read the output from the command
             BufferedReader reader = new BufferedReader(new InputStreamReader(in));
             String line;
             while ((line = reader.readLine()) != null) {
-                providedFormats.add(line.trim()); // Assuming each line is a filename
+                providedFormats.add(line.trim());
             }
 
             channelExec.disconnect();
@@ -197,41 +162,21 @@ public class Image_Out_Batches {
         return providedFormats;
     }
 
-    private void checkAndPrintMissingFormats(List<String> providedFormats) {
-        // Expected formats
-        Set<String> expectedFormats = new HashSet<>(Arrays.asList(
-                "compressed.jp2", "dirInfo.txt", "downsampled.tif", "lossless.jp2",
-                "macro.jpg", "thumbnail.jpg", "thumbnail_original.jpg",
-                "thumbnail_small.jpg", "label.jpg"
-        ));
+    private boolean isPathValid(String jp2Path) {
+        // Define the expected prefix
+        String expectedPrefix = "/ddn/storageIIT/humanbrain/analytics";
 
-        // Extract section numbers and group provided formats by section
-        Map<String, Set<String>> sectionFormatsMap = new HashMap<>();
-        for (String format : providedFormats) {
-            int sectionStart = format.indexOf("SE_") + 3;
-            int sectionEnd = format.indexOf('_', sectionStart);
-            if (sectionEnd == -1) {
-                sectionEnd = format.indexOf('-', sectionStart);
-            }
-            if (sectionStart != -1 && sectionEnd != -1) {
-                String sectionNumber = format.substring(sectionStart, sectionEnd);
-                sectionFormatsMap.putIfAbsent(sectionNumber, new HashSet<String>());
-                for (String expected : expectedFormats) {
-                    if (format.endsWith(expected)) {
-                        sectionFormatsMap.get(sectionNumber).add(expected);
-                        break;
-                    }
-                }
+        // Check if jp2Path starts with the expected prefix
+        return jp2Path.startsWith(expectedPrefix);
+    }
+
+    private List<String> filterSectionNumbers(List<String> sectionNumbers) {
+        List<String> filteredSections = new ArrayList<>();
+        for (String section : sectionNumbers) {
+            if (section.startsWith("SE_")) {
+                filteredSections.add(section);
             }
         }
-
-        // Check for missing formats in each section
-        for (Map.Entry<String, Set<String>> entry : sectionFormatsMap.entrySet()) {
-            String sectionNumber = entry.getKey();
-            Set<String> providedSuffixes = entry.getValue();
-            Set<String> missingFormats = new HashSet<>(expectedFormats);
-            missingFormats.removeAll(providedSuffixes);
-            System.out.println("Section " + sectionNumber + " missing formats: " + missingFormats);
-        }
+        return filteredSections;
     }
 }
